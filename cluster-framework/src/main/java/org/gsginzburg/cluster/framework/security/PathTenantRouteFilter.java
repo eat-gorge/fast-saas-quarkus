@@ -37,7 +37,8 @@ import java.util.regex.Pattern;
  *   1. Base62-decodes the segment to the canonical tenant UUID string.
  *   2. Stores it in the routing context under {@value ATTRIBUTE}.
  *   3. Rewrites the request URL to remove the {@code /c/{id}} segment so that
- *      normal JAX-RS routing continues against the original resource paths.
+ *      normal JAX-RS routing continues against the original resource paths,
+ *      preserving the query string across the reroute.
  *
  * Priority 200 ensures this runs before Quarkus authentication handlers.
  * On the second routing pass (after reroute) the path no longer matches,
@@ -67,7 +68,7 @@ public class PathTenantRouteFilter {
             return;
         }
 
-        String path = ctx.normalisedPath();
+        String path = ctx.normalizedPath();
         Matcher m = TENANT_PATH.matcher(path);
         if (!m.matches()) {
             ctx.next();
@@ -87,10 +88,17 @@ public class PathTenantRouteFilter {
             return;
         }
 
-        String newPath = prefix.isEmpty() ? remainingPath : prefix + remainingPath;
+        // normalizedPath() carries no query string, so it must be re-attached explicitly:
+        // reroute() is URI-based and silently drops whatever the new URI omits.
+        String query = ctx.request().query();
+        String newUri = prefix.isEmpty() ? remainingPath : prefix + remainingPath;
+        if (query != null && !query.isEmpty()) {
+            newUri = newUri + '?' + query;
+        }
+
         ctx.put(ATTRIBUTE, tenantUuid.toString());
         log.debug("Path tenant injection: decoded '{}' → tenantId={}, rerouting to '{}'",
-                base62Id, tenantUuid, newPath);
-        ctx.reroute(newPath);
+                base62Id, tenantUuid, newUri);
+        ctx.reroute(newUri);
     }
 }
