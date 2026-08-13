@@ -45,6 +45,16 @@ public abstract class DtoConverter<D, E> {
             "getClass", "hashCode", "equals", "toString",
             "wait", "notify", "notifyAll", "finalize");
 
+    private static final Map<Class<?>, Class<?>> PRIMITIVE_BY_WRAPPER = Map.of(
+            Boolean.class,   boolean.class,
+            Byte.class,      byte.class,
+            Character.class, char.class,
+            Short.class,     short.class,
+            Integer.class,   int.class,
+            Long.class,      long.class,
+            Float.class,     float.class,
+            Double.class,    double.class);
+
     protected final Class<D> dtoClass;
     protected final Class<E> entityClass;
 
@@ -91,6 +101,11 @@ public abstract class DtoConverter<D, E> {
                     args[i] = primitiveDefault(types[i]);
                 }
             } else {
+                args[i] = primitiveDefault(types[i]);
+            }
+            // A primitive component cannot take null: the canonical constructor would reject it and
+            // the whole conversion would fail over one unresolved value.
+            if (args[i] == null && types[i].isPrimitive()) {
                 args[i] = primitiveDefault(types[i]);
             }
         }
@@ -174,11 +189,12 @@ public abstract class DtoConverter<D, E> {
 
         if (targetType.isAssignableFrom(sourceType)) return value;
 
-        // Integer.TYPE == int.class, Long.TYPE == long.class, etc.
-        // so if the source is the wrapper for this primitive target, pass it through.
-        if (targetType.isPrimitive()) {
-            try { if (sourceType.getField("TYPE").get(null) == targetType) return value; }
-            catch (Exception ignored) {}
+        // A wrapper for this primitive target passes straight through. Resolved from a table, not
+        // from `sourceType.getField("TYPE")`: that field lookup throws NoSuchFieldException in a
+        // native image, where JDK classes carry no reflection metadata, and every primitive property
+        // would then silently convert to null and be skipped by the copy.
+        if (targetType.isPrimitive() && PRIMITIVE_BY_WRAPPER.get(sourceType) == targetType) {
+            return value;
         }
 
         // String ↔ UUID for *id properties (case-insensitive "id" suffix)
